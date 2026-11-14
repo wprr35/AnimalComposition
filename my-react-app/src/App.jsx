@@ -1,6 +1,6 @@
 
 import { useState, useRef, useEffect } from "react";
-import './App.css';
+import "./App.css";
 
 // Convert AudioBuffer into WAV format
 function audioBufferToWav(buffer) {
@@ -37,12 +37,7 @@ function audioBufferToWav(buffer) {
     true
   );
 
-  view.setUint16(
-    32,
-    numChannels * bytesPerSample,
-    true
-  );
-
+  view.setUint16(32, numChannels * bytesPerSample, true);
   view.setUint16(34, bitsPerSample, true);
   writeString(36, "data");
   view.setUint32(40, dataLength, true);
@@ -58,14 +53,15 @@ function audioBufferToWav(buffer) {
 
   for (let i = 0; i < buffer.length; i++) {
     for (let channel = 0; channel < numChannels; channel++) {
-      let sample = Math.max(
+      const sample = Math.max(
         -1,
         Math.min(1, channels[channel][i])
       );
 
-      const pcm = sample < 0
-        ? sample * 0x8000
-        : sample * 0x7FFF;
+      const pcm =
+        sample < 0
+          ? sample * 0x8000
+          : sample * 0x7FFF;
 
       view.setInt16(offset, pcm, true);
       offset += 2;
@@ -73,7 +69,7 @@ function audioBufferToWav(buffer) {
   }
 
   return new Blob([wavBuffer], {
-    type: "audio/wav"
+    type: "audio/wav",
   });
 }
 
@@ -81,17 +77,22 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
+
   const [progress, setProgress] = useState(0);
   const [playProgress, setPlayProgress] = useState(0);
   const [level, setLevel] = useState(0);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+
   const audioRef = useRef(null);
   const analyserRef = useRef(null);
+
   const rafRef = useRef(null);
   const timerRef = useRef(null);
   const intervalRef = useRef(null);
+
   const audioCtxRef = useRef(null);
   const discardRef = useRef(false);
   const audioUrlRef = useRef(null);
@@ -104,7 +105,7 @@ function App() {
       discardRef.current = false;
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true
+        audio: true,
       });
 
       const ctx = new AudioContext();
@@ -129,6 +130,7 @@ function App() {
       setLevel(0);
       setIsRecording(true);
 
+      // Collect audio data
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
@@ -144,7 +146,7 @@ function App() {
         if (discardRef.current) return;
 
         const blob = new Blob(chunksRef.current, {
-          type: recorder.mimeType || "audio/webm"
+          type: recorder.mimeType || "audio/webm",
         });
 
         try {
@@ -163,14 +165,24 @@ function App() {
           if (discardRef.current) return;
 
           const wavFile = new File(
-          [wavBlob],
-          "animal-recording.wav",
-          {
-            type: "audio/wav"
-          }
-        );
+            [wavBlob],
+            "animal-recording.wav",
+            {
+              type: "audio/wav",
+            }
+          );
 
-        setAudioFile(wavFile);
+          // Create playable audio URL
+          const url = URL.createObjectURL(wavFile);
+
+          if (audioUrlRef.current) {
+            URL.revokeObjectURL(audioUrlRef.current);
+          }
+
+          audioUrlRef.current = url;
+
+          setAudioFile(wavFile);
+          setAudioUrl(url);
 
         } catch (err) {
           console.error("WAV conversion error:", err);
@@ -229,7 +241,6 @@ function App() {
           }
 
           const rms = Math.sqrt(sum / data.length);
-
           const volume = Math.min(rms * 10, 1);
 
           setLevel(volume);
@@ -248,31 +259,29 @@ function App() {
   };
 
   // Play / pause recording
-  const toggle_play = () => {
-    if (!audioRef.current) return;
-
+  const toggle_play = async () => {
     const audio = audioRef.current;
 
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      if (
-        audio.ended ||
-        audio.currentTime >= audio.duration
-      ) {
-        audio.currentTime = 0;
+    if (!audio || !audioUrl) return;
+
+    try {
+      if (isPlaying) {
+        audio.pause();
+        setIsPlaying(false);
+      } else {
+        if (
+          audio.ended ||
+          audio.currentTime >= audio.duration
+        ) {
+          audio.currentTime = 0;
+        }
+
+        await audio.play();
+        setIsPlaying(true);
       }
-
-      setPlayProgress(
-        audio.duration
-          ? (audio.currentTime / audio.duration) * 100
-          : 0
-      );
-
-      audio.play()
-        .then(() => setIsPlaying(true))
-        .catch(console.error);
+    } catch (err) {
+      console.error("Audio playback error:", err);
+      setIsPlaying(false);
     }
   };
 
@@ -304,8 +313,11 @@ function App() {
     }
 
     setAudioUrl(null);
+    setAudioFile(null);
+
     setIsRecording(false);
     setIsPlaying(false);
+
     setProgress(0);
     setPlayProgress(0);
     setLevel(0);
@@ -375,7 +387,7 @@ function App() {
                   id="soundbar_fill"
                   style={{
                     width: `${level * 100}%`,
-                    height: "100%"
+                    height: "100%",
                   }}
                 />
               </div>
@@ -384,7 +396,7 @@ function App() {
                 <div
                   className="progress_fill"
                   style={{
-                    width: `${progress}%`
+                    width: `${progress}%`,
                   }}
                 />
               </div>
@@ -406,12 +418,13 @@ function App() {
             </div>
           )}
 
-          {!isRecording && audioFile && (
+          {!isRecording && audioFile && audioUrl && (
             <div id="player_bar">
 
               <audio
                 ref={audioRef}
-                src={audioFile}
+                src={audioUrl}
+                preload="auto"
                 onTimeUpdate={() => {
                   const audio = audioRef.current;
 
@@ -425,13 +438,16 @@ function App() {
                   setIsPlaying(false);
                   setPlayProgress(100);
                 }}
+                onPause={() => {
+                  setIsPlaying(false);
+                }}
               />
 
               <div className="progress_container">
                 <div
                   className="progress_fill"
                   style={{
-                    width: `${playProgress}%`
+                    width: `${playProgress}%`,
                   }}
                 />
               </div>
