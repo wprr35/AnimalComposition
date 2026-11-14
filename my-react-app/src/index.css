@@ -137,8 +137,8 @@ code {
   border-radius: 5px;
   height: 2.5em;
   width: 10em;
-  margin: 2.5em;
   margin-bottom: auto;
+  margin-top: 1em;
 }
 
 #player_bar {
@@ -150,7 +150,8 @@ code {
   justify-content: center;
   align-items: center;
   border-radius: 3em;
-  padding-left: 10px;
+  padding-left: 15px;
+  padding-right: 15px;
 }   
 
 #play-pause_button{
