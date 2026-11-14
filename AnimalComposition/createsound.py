@@ -11,7 +11,7 @@ from diffusers import AutoPipelineForText2Image
 
 animals = []
 folder = Path("/Users/oliverbarber/Documents/Uni Year 2/Durhack/AnimalComposition/Sounds")
-#"/Users/oliverbarber/Documents/Uni Year 2/Durhack/AnimalComposition/Sounds"
+#"/Users/oliverbarber/Documents/Uni Year 2/Durhack/Sounds"
 
 for file_path in folder.iterdir():
     if file_path.is_file() and not file_path.name.startswith("."):
