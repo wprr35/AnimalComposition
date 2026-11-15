@@ -1,0 +1,12 @@
+{
+    "name": "Doggooobypig",
+    "animals": [
+        "Dog",
+        "Dog",
+        "Bird",
+        "Pig"
+    ],
+    "image": "hybrid_animal.png",
+    "audio": "output.mp3",
+    "infoAudio": "info.mp3"
+}
