@@ -2,762 +2,1088 @@
 import { useState, useRef, useEffect } from "react";
 import "./App.css";
 
+const API_URL = "http://localhost:5000";
+
+
 // ==========================================
 // CONVERT AUDIO BUFFER TO WAV
 // ==========================================
 
 function audioBufferToWav(buffer) {
-  const numChannels = buffer.numberOfChannels;
-  const sampleRate = buffer.sampleRate;
-  const bitsPerSample = 16;
-  const bytesPerSample = bitsPerSample / 8;
 
-  const dataLength =
-    buffer.length * numChannels * bytesPerSample;
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const bitsPerSample = 16;
+    const bytesPerSample = bitsPerSample / 8;
 
-  const wavBuffer = new ArrayBuffer(44 + dataLength);
-  const view = new DataView(wavBuffer);
+    const dataLength =
+        buffer.length * numChannels * bytesPerSample;
 
-  function writeString(offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
+    const wavBuffer = new ArrayBuffer(44 + dataLength);
+    const view = new DataView(wavBuffer);
+
+    function writeString(offset, string) {
+
+        for (let i = 0; i < string.length; i++) {
+
+            view.setUint8(
+                offset + i,
+                string.charCodeAt(i)
+            );
+
+        }
+
     }
-  }
 
-  // WAV header
-  writeString(0, "RIFF");
-  view.setUint32(4, 36 + dataLength, true);
-  writeString(8, "WAVE");
-  writeString(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
+    // WAV header
 
-  view.setUint32(
-    28,
-    sampleRate * numChannels * bytesPerSample,
-    true
-  );
+    writeString(0, "RIFF");
 
-  view.setUint16(32, numChannels * bytesPerSample, true);
-  view.setUint16(34, bitsPerSample, true);
+    view.setUint32(4, 36 + dataLength, true);
 
-  writeString(36, "data");
-  view.setUint32(40, dataLength, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
 
-  // Convert samples to 16-bit PCM
-  const channels = [];
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
 
-  for (let channel = 0; channel < numChannels; channel++) {
-    channels.push(buffer.getChannelData(channel));
-  }
+    view.setUint32(
+        28,
+        sampleRate * numChannels * bytesPerSample,
+        true
+    );
 
-  let offset = 44;
+    view.setUint16(
+        32,
+        numChannels * bytesPerSample,
+        true
+    );
 
-  for (let i = 0; i < buffer.length; i++) {
+    view.setUint16(34, bitsPerSample, true);
+
+    writeString(36, "data");
+
+    view.setUint32(40, dataLength, true);
+
+    // Convert samples to 16-bit PCM
+
+    const channels = [];
+
     for (let channel = 0; channel < numChannels; channel++) {
-      const sample = Math.max(
-        -1,
-        Math.min(1, channels[channel][i])
-      );
 
-      const pcm =
-        sample < 0
-          ? sample * 0x8000
-          : sample * 0x7FFF;
+        channels.push(
+            buffer.getChannelData(channel)
+        );
 
-      view.setInt16(offset, pcm, true);
-      offset += 2;
     }
-  }
 
-  return new Blob([wavBuffer], {
-    type: "audio/wav",
-  });
+    let offset = 44;
+
+    for (let i = 0; i < buffer.length; i++) {
+
+        for (let channel = 0; channel < numChannels; channel++) {
+
+            const sample = Math.max(
+                -1,
+                Math.min(1, channels[channel][i])
+            );
+
+            const pcm = sample < 0
+                ? sample * 0x8000
+                : sample * 0x7FFF;
+
+            view.setInt16(offset, pcm, true);
+
+            offset += 2;
+
+        }
+
+    }
+
+    return new Blob([wavBuffer], {
+        type: "audio/wav"
+    });
+
 }
+
 
 // ==========================================
 // MAIN APPLICATION
 // ==========================================
 
 function App() {
-  const [isRecording, setIsRecording] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
 
-  const [audioFile, setAudioFile] = useState(null);
-  const [audioUrl, setAudioUrl] = useState(null);
+    const [isRecording, setIsRecording] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
 
-  const [progress, setProgress] = useState(0);
-  const [playProgress, setPlayProgress] = useState(0);
-  const [level, setLevel] = useState(0);
+    const [audioFile, setAudioFile] = useState(null);
+    const [audioUrl, setAudioUrl] = useState(null);
+    const [infoAudioFile, setInfoAudioFile] = useState(null);
+    const [infoAudioUrl, setInfoAudioUrl] = useState(null);
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [playProgress, setPlayProgress] = useState(0);
+    const [level, setLevel] = useState(0);
 
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isUploaded, setIsUploaded] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
 
-  const audioRef = useRef(null);
-  const analyserRef = useRef(null);
+    const [results, setResults] = useState(null);
 
-  const rafRef = useRef(null);
-  const timerRef = useRef(null);
-  const intervalRef = useRef(null);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [uploadMessage, setUploadMessage] = useState("");
 
-  const audioCtxRef = useRef(null);
-  const discardRef = useRef(false);
-  const audioUrlRef = useRef(null);
+    const mediaRecorderRef = useRef(null);
+    const chunksRef = useRef([]);
 
-  const [next_pressed, setNextPressed] = useState(false);
+    const audioRef = useRef(null);
+    const analyserRef = useRef(null);
 
-  // ==========================================
-  // CLEAN UP AUDIO URL
-  // ==========================================
+    const rafRef = useRef(null);
+    const timerRef = useRef(null);
+    const intervalRef = useRef(null);
 
-  const clearAudioUrl = () => {
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
+    const audioCtxRef = useRef(null);
+    const discardRef = useRef(false);
+    const audioUrlRef = useRef(null);
 
-    setAudioUrl(null);
-    setAudioFile(null);
-  };
 
-  // ==========================================
-  // START RECORDING
-  // ==========================================
+    // ==========================================
+    // CLEAR AUDIO URL
+    // ==========================================
 
-  const start_record = async () => {
-    if (isRecording) return;
+    const clearAudioUrl = () => {
 
-    let stream;
-    let ctx;
+        if (audioUrlRef.current) {
 
-    try {
-      discardRef.current = false;
-
-      // Request microphone permission
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-
-      // Create audio context
-      ctx = new AudioContext();
-      await ctx.resume();
-
-      audioCtxRef.current = ctx;
-
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-
-      analyser.fftSize = 256;
-      source.connect(analyser);
-
-      analyserRef.current = analyser;
-
-      // Select a supported recording format
-      const mimeTypes = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-      ];
-
-      const supportedType = mimeTypes.find((type) =>
-        MediaRecorder.isTypeSupported(type)
-      );
-
-      const recorder = supportedType
-        ? new MediaRecorder(stream, {
-            mimeType: supportedType,
-          })
-        : new MediaRecorder(stream);
-
-      console.log("Recording format:", recorder.mimeType);
-
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      // Clear previous recording
-      clearAudioUrl();
-
-      setProgress(0);
-      setPlayProgress(0);
-      setLevel(0);
-      setIsPlaying(false);
-      setIsRecording(true);
-
-      // ==========================================
-      // COLLECT AUDIO DATA
-      // ==========================================
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      // ==========================================
-      // STOP RECORDING AND CONVERT TO WAV
-      // ==========================================
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-
-        try {
-          await ctx.close();
-        } catch (error) {
-          console.warn("Audio context close:", error);
-        }
-
-        if (audioCtxRef.current === ctx) {
-          audioCtxRef.current = null;
-        }
-
-        if (discardRef.current) return;
-
-        try {
-          // Combine recorded chunks
-          const blob = new Blob(chunksRef.current, {
-            type: recorder.mimeType || "audio/webm",
-          });
-
-          if (blob.size === 0) {
-            throw new Error("The recording is empty.");
-          }
-
-          console.log("Original audio format:", blob.type);
-          console.log("Original audio size:", blob.size);
-
-          // Decode recorded audio
-          const decodeCtx = new AudioContext();
-
-          let audioBuffer;
-
-          try {
-            const arrayBuffer = await blob.arrayBuffer();
-
-            audioBuffer = await decodeCtx.decodeAudioData(
-              arrayBuffer
+            URL.revokeObjectURL(
+                audioUrlRef.current
             );
-          } finally {
-            await decodeCtx.close();
-          }
 
-          if (discardRef.current) return;
+            audioUrlRef.current = null;
 
-          // Convert audio to WAV
-          const wavBlob = audioBufferToWav(audioBuffer);
+        }
 
-          const wavFile = new File(
-            [wavBlob],
-            "animal-recording.wav",
-            {
-              type: "audio/wav",
-            }
-          );
+        setAudioUrl(null);
+        setAudioFile(null);
 
-          // Create playback URL
-          const url = URL.createObjectURL(wavFile);
+    };
 
-          if (audioUrlRef.current) {
-            URL.revokeObjectURL(audioUrlRef.current);
-          }
 
-          audioUrlRef.current = url;
+    // ==========================================
+    // START RECORDING
+    // ==========================================
 
-          setAudioFile(wavFile);
-          setAudioUrl(url);
+    const start_record = async () => {
 
-          console.log("WAV conversion successful!");
-          console.log("WAV size:", wavFile.size);
+        if (isRecording || isProcessing) return;
+
+        let stream;
+        let ctx;
+
+        try {
+
+            discardRef.current = false;
+
+            setErrorMessage("");
+            setUploadMessage("");
+
+            setResults(null);
+            setIsUploaded(false);
+
+            // Request microphone permission
+
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: true
+            });
+
+            // Create audio context
+
+            ctx = new AudioContext();
+
+            await ctx.resume();
+
+            audioCtxRef.current = ctx;
+
+            const source = ctx.createMediaStreamSource(stream);
+
+            const analyser = ctx.createAnalyser();
+
+            analyser.fftSize = 256;
+
+            source.connect(analyser);
+
+            analyserRef.current = analyser;
+
+
+            // Select supported recording format
+
+            const mimeTypes = [
+                "audio/webm;codecs=opus",
+                "audio/webm",
+                "audio/mp4"
+            ];
+
+            const supportedType = mimeTypes.find(type =>
+                MediaRecorder.isTypeSupported(type)
+            );
+
+            const recorder = supportedType
+                ? new MediaRecorder(stream, {
+                    mimeType: supportedType
+                })
+                : new MediaRecorder(stream);
+
+            mediaRecorderRef.current = recorder;
+
+            chunksRef.current = [];
+
+            clearAudioUrl();
+
+            setProgress(0);
+            setPlayProgress(0);
+            setLevel(0);
+
+            setIsPlaying(false);
+            setIsRecording(true);
+
+
+            // ==========================================
+            // COLLECT AUDIO
+            // ==========================================
+
+            recorder.ondataavailable = (event) => {
+
+                if (event.data && event.data.size > 0) {
+
+                    chunksRef.current.push(event.data);
+
+                }
+
+            };
+
+
+            // ==========================================
+            // STOP RECORDING AND CONVERT TO WAV
+            // ==========================================
+
+            recorder.onstop = async () => {
+
+                stream.getTracks().forEach(
+                    track => track.stop()
+                );
+
+                try {
+
+                    await ctx.close();
+
+                } catch (error) {
+
+                    console.warn(error);
+
+                }
+
+                if (audioCtxRef.current === ctx) {
+
+                    audioCtxRef.current = null;
+
+                }
+
+                if (discardRef.current) return;
+
+                try {
+
+                    const blob = new Blob(
+                        chunksRef.current,
+                        {
+                            type: recorder.mimeType || "audio/webm"
+                        }
+                    );
+
+                    if (blob.size === 0) {
+
+                        throw new Error("Recording is empty.");
+
+                    }
+
+                    // Decode recording
+
+                    const decodeCtx = new AudioContext();
+
+                    let audioBuffer;
+
+                    try {
+
+                        const arrayBuffer = await blob.arrayBuffer();
+
+                        audioBuffer = await decodeCtx.decodeAudioData(
+                            arrayBuffer
+                        );
+
+                    } finally {
+
+                        await decodeCtx.close();
+
+                    }
+
+                    if (discardRef.current) return;
+
+                    // Convert to WAV
+
+                    const wavBlob = audioBufferToWav(audioBuffer);
+
+                    const wavFile = new File(
+                        [wavBlob],
+                        "animal-recording.wav",
+                        {
+                            type: "audio/wav"
+                        }
+                    );
+
+                    // Create playback URL
+
+                    const url = URL.createObjectURL(wavFile);
+
+                    if (audioUrlRef.current) {
+
+                        URL.revokeObjectURL(
+                            audioUrlRef.current
+                        );
+
+                    }
+
+                    audioUrlRef.current = url;
+
+                    setAudioFile(wavFile);
+                    setAudioUrl(url);
+
+                } catch (error) {
+
+                    console.error(error);
+
+                    setErrorMessage(
+                        "Could not convert recording to WAV: " +
+                        error.message
+                    );
+
+                }
+
+            };
+
+
+            // Start recording
+
+            recorder.start();
+
+
+            // ==========================================
+            // RECORDING PROGRESS
+            // ==========================================
+
+            const startTime = Date.now();
+
+            intervalRef.current = setInterval(() => {
+
+                const elapsed = Date.now() - startTime;
+
+                const percentage = Math.min(
+                    (elapsed / 5000) * 100,
+                    100
+                );
+
+                setProgress(percentage);
+
+            }, 50);
+
+
+            // ==========================================
+            // AUTOMATIC STOP AFTER 5 SECONDS
+            // ==========================================
+
+            timerRef.current = setTimeout(() => {
+
+                if (recorder.state === "recording") {
+
+                    recorder.stop();
+
+                }
+
+                clearInterval(intervalRef.current);
+
+                setProgress(100);
+
+                setIsRecording(false);
+
+                setLevel(0);
+
+                if (rafRef.current) {
+
+                    cancelAnimationFrame(rafRef.current);
+
+                    rafRef.current = null;
+
+                }
+
+            }, 5000);
+
+
+            // ==========================================
+            // SOUND VISUALISER
+            // ==========================================
+
+            const data = new Uint8Array(analyser.fftSize);
+
+            const draw = () => {
+
+                if (
+                    analyserRef.current === analyser &&
+                    recorder.state === "recording"
+                ) {
+
+                    analyser.getByteTimeDomainData(data);
+
+                    let sum = 0;
+
+                    for (let i = 0; i < data.length; i++) {
+
+                        const normalized =
+                            (data[i] - 128) / 128;
+
+                        sum += normalized * normalized;
+
+                    }
+
+                    const rms = Math.sqrt(
+                        sum / data.length
+                    );
+
+                    const volume = Math.min(
+                        rms * 10,
+                        1
+                    );
+
+                    setLevel(volume);
+
+                    rafRef.current =
+                        requestAnimationFrame(draw);
+
+                }
+
+            };
+
+            draw();
 
         } catch (error) {
-          console.error("WAV conversion error:", error);
 
-          alert(
-            "Could not convert recording to WAV.\n\n" +
-            error.name +
-            ": " +
-            error.message
-          );
+            console.error("Microphone error:", error);
+
+            if (stream) {
+
+                stream.getTracks().forEach(
+                    track => track.stop()
+                );
+
+            }
+
+            if (ctx && ctx.state !== "closed") {
+
+                await ctx.close();
+
+            }
+
+            if (audioCtxRef.current === ctx) {
+
+                audioCtxRef.current = null;
+
+            }
+
+            analyserRef.current = null;
+
+            setIsRecording(false);
+
+            setErrorMessage(
+                "Could not access microphone: " +
+                error.message
+            );
         }
-      };
+    };
 
-      // Start recorder
-      recorder.start();
 
-      // ==========================================
-      // RECORDING PROGRESS
-      // ==========================================
+    // ==========================================
+    // PLAY / PAUSE RECORDING
+    // ==========================================
 
-      const startTime = Date.now();
+    const toggle_play = async () => {
 
-      intervalRef.current = setInterval(() => {
-        const elapsed = Date.now() - startTime;
+        const audio = audioRef.current;
 
-        const percentage = Math.min(
-          (elapsed / 5000) * 100,
-          100
-        );
+        if (!audio || !audioUrl) return;
 
-        setProgress(percentage);
-      }, 50);
+        try {
+            if (isPlaying) {
 
-      // ==========================================
-      // AUTOMATICALLY STOP AFTER 5 SECONDS
-      // ==========================================
+                audio.pause();
 
-      timerRef.current = setTimeout(() => {
-        if (recorder.state === "recording") {
-          recorder.stop();
+                setIsPlaying(false);
+
+            } else {
+
+                if (
+                    audio.ended ||
+                    audio.currentTime >= audio.duration
+                ) {
+                    audio.currentTime = 0;
+                }
+                await audio.play();
+
+                setIsPlaying(true);
+            }
+
+        } catch (error) {
+            console.error(error);
+
+            setIsPlaying(false);
+
+            setErrorMessage(
+                "Could not play recording: " +
+                error.message
+            );
         }
+    };
+
+
+    // ==========================================
+    // RESET RECORDING
+    // ==========================================
+
+    const toggle_stop = () => {
+
+        discardRef.current = true;
+
+        clearTimeout(timerRef.current);
 
         clearInterval(intervalRef.current);
 
-        setProgress(100);
+        if (rafRef.current) {
+
+            cancelAnimationFrame(rafRef.current);
+
+            rafRef.current = null;
+        }
+
+        if (
+            mediaRecorderRef.current?.state === "recording"
+        ) {
+
+            mediaRecorderRef.current.stop();
+        }
+
+        analyserRef.current = null;
+
+        if (audioRef.current) {
+
+            audioRef.current.pause();
+
+            audioRef.current.currentTime = 0;
+        }
+
+        if (
+            audioCtxRef.current &&
+            audioCtxRef.current.state !== "closed"
+        ) {
+
+            audioCtxRef.current.close();
+
+            audioCtxRef.current = null;
+        }
+
+        if (mediaRecorderRef.current?.stream) {
+
+            mediaRecorderRef.current.stream
+                .getTracks()
+                .forEach(track => track.stop());
+        }
+
+        clearAudioUrl();
+
         setIsRecording(false);
+        setIsPlaying(false);
+        setIsSubmitting(false);
+
+        setIsUploaded(false);
+
+        setProgress(0);
+        setPlayProgress(0);
         setLevel(0);
 
-        if (rafRef.current) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = null;
-        }
-      }, 5000);
-
-      // ==========================================
-      // SOUND VISUALISER
-      // ==========================================
-
-      const data = new Uint8Array(analyser.fftSize);
-
-      const draw = () => {
-        if (
-          analyserRef.current === analyser &&
-          recorder.state === "recording"
-        ) {
-          analyser.getByteTimeDomainData(data);
-
-          let sum = 0;
-
-          for (let i = 0; i < data.length; i++) {
-            const normalized = (data[i] - 128) / 128;
-            sum += normalized * normalized;
-          }
-
-          const rms = Math.sqrt(sum / data.length);
-          const volume = Math.min(rms * 10, 1);
-
-          setLevel(volume);
-
-          rafRef.current = requestAnimationFrame(draw);
-        }
-      };
-
-      draw();
-
-    } catch (error) {
-      console.error("Microphone error:", error);
-
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-
-      if (ctx && ctx.state !== "closed") {
-        await ctx.close();
-      }
-
-      if (audioCtxRef.current === ctx) {
-        audioCtxRef.current = null;
-      }
-
-      analyserRef.current = null;
-
-      setIsRecording(false);
-
-      alert(
-        "Could not access microphone.\n\n" +
-        error.name +
-        ": " +
-        error.message
-      );
-    }
-  };
-
-  // ==========================================
-  // PLAY / PAUSE RECORDING
-  // ==========================================
-
-  const toggle_play = async () => {
-    const audio = audioRef.current;
-
-    if (!audio || !audioUrl) return;
-
-    try {
-      if (isPlaying) {
-        audio.pause();
-        setIsPlaying(false);
-      } else {
-        if (
-          audio.ended ||
-          audio.currentTime >= audio.duration
-        ) {
-          audio.currentTime = 0;
-        }
-
-        await audio.play();
-
-        setIsPlaying(true);
-      }
-    } catch (error) {
-      console.error("Audio playback error:", error);
-
-      setIsPlaying(false);
-
-      alert("Could not play recording: " + error.message);
-    }
-  };
-
-  // ==========================================
-  // RESET RECORDING
-  // ==========================================
-
-  const toggle_stop = () => {
-    discardRef.current = true;
-
-    clearTimeout(timerRef.current);
-    clearInterval(intervalRef.current);
-
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-
-    if (
-      mediaRecorderRef.current?.state === "recording"
-    ) {
-      mediaRecorderRef.current.stop();
-    }
-
-    analyserRef.current = null;
-
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
-
-    if (
-      audioCtxRef.current &&
-      audioCtxRef.current.state !== "closed"
-    ) {
-      audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
-
-    if (mediaRecorderRef.current?.stream) {
-      mediaRecorderRef.current.stream
-        .getTracks()
-        .forEach((track) => track.stop());
-    }
-
-    clearAudioUrl();
-
-    setIsRecording(false);
-    setIsPlaying(false);
-    setIsSubmitting(false);
-
-    setProgress(0);
-    setPlayProgress(0);
-    setLevel(0);
-
-    chunksRef.current = [];
-  };
-
-  // ==========================================
-  // SUBMIT WAV TO SERVER
-  // ==========================================
-
-  const submit = async () => {
-    if (!audioFile || isSubmitting) {
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-
-      const formData = new FormData();
-
-      formData.append("audio", audioFile);
-
-      const response = await fetch(
-        "http://localhost:5000/api/save-audio",
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to save recording.");
-      }
-
-      const result = await response.json();
-
-      console.log("Submitted:", result);
-
-      alert(
-        "Recording saved successfully!\n\n" +
-        result.filename
-      );
-
-    } catch (error) {
-      console.error("Save error:", error);
-
-      alert(
-        "Could not save your recording.\n\n" +
-        error.message
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-
-    fetch("http://localhost:5000/run-python", {
-      method: "POST",
-    });
-  };
-
-  // ==========================================
-  // NEXT BUTTON
-  // ==========================================
-
-  const next = async () => {
-    toggle_stop();
-    console.log("Next!");
-
-    // Fetch generated name, sound and image and display below
-    
-    setNextPressed(true);
-
-    // Clear Sounds folder
-    try {
-        response = await fetch(
-            "http://localhost:5000/api/clear-sounds",
-            {
-                method: "DELETE",
-            }
-        );
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.message);
-        }
-
-        console.log(result.message);
-
-    } catch (err) {
-        console.error("Error deleting Sounds contents:", err);
-    }
-  };  
-
-  // ==========================================
-  // CLEAN UP WHEN COMPONENT UNMOUNTS
-  // ==========================================
-
-  useEffect(() => {
-    return () => {
-      clearTimeout(timerRef.current);
-      clearInterval(intervalRef.current);
-
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-      }
-
-      if (
-        mediaRecorderRef.current?.state === "recording"
-      ) {
-        mediaRecorderRef.current.stop();
-      }
-
-      if (
-        audioCtxRef.current &&
-        audioCtxRef.current.state !== "closed"
-      ) {
-        audioCtxRef.current.close();
-      }
-
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-      }
-
-      if (mediaRecorderRef.current?.stream) {
-        mediaRecorderRef.current.stream
-          .getTracks()
-          .forEach((track) => track.stop());
-      }
+        chunksRef.current = [];
     };
-  }, []);
 
-  // ==========================================
-  // USER INTERFACE
-  // ==========================================
 
-  return (
-    <>
-      <section id="title_section">
-        <h1 id="title">Animal Composer</h1>
+    // ==========================================
+    // SUBMIT WAV TO SERVER
+    // ==========================================
 
-        <p>Make an animal sound!</p>
+    const submit = async () => {
 
-        <p>Record your sound for up to 5 seconds.</p>
-      </section>
+        if (!audioFile || isSubmitting || isUploaded) {
+            return;
+        }
 
-      <section id="middle_section">
-        <div id="recording_container">
+        try {
+            setIsSubmitting(true);
 
-          {/* RECORD BUTTON */}
+            setErrorMessage("");
+            setUploadMessage("");
 
-          {!isRecording && !audioFile && (
-            <button
-              id="record_button"
-              onClick={start_record}
-            >
-              🎙️
-            </button>
-          )}
+            const formData = new FormData();
 
-          {/* RECORDING INTERFACE */}
+            formData.append("audio", audioFile);
 
-          {isRecording && (
-            <div id="player_bar">
+            const response = await fetch(
+                `${API_URL}/api/save-audio`,
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
 
-              <div id="soundbar">
-                <div
-                  id="soundbar_fill"
-                  style={{
-                    width: `${level * 100}%`,
-                    height: "100%",
-                  }}
-                />
-              </div>
+            const result = await response.json();
 
-              <div className="progress_container">
-                <div
-                  className="progress_fill"
-                  style={{
-                    width: `${progress}%`,
-                  }}
-                />
-              </div>
+            if (!response.ok) {
+                throw new Error(
+                    result.message || "Upload failed."
+                );
+            }
+            console.log("Saved:", result.filename);
 
-              <p>
-                {Math.max(
-                  0,
-                  Math.ceil((5000 - progress * 50) / 1000)
-                )} seconds left
-              </p>
+            setIsUploaded(true);
 
-            </div>
-          )}
+            setUploadMessage(
+                "Recording saved! You can now record another animal."
+            );
 
-          {/* PLAYBACK INTERFACE */}
+        } catch (error) {
+            console.error(error);
 
-          {!isRecording && audioFile && audioUrl && (
-            <div id="player_bar">
+            setErrorMessage(
+                "Could not save recording: " +
+                error.message
+            );
 
-              <audio
-                ref={audioRef}
-                src={audioUrl}
-                preload="auto"
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
-                onTimeUpdate={() => {
-                  const audio = audioRef.current;
+    // ==========================================
+    // PROCESS BATCH AND DISPLAY RESULTS
+    // ==========================================
 
-                  if (audio && audio.duration) {
-                    setPlayProgress(
-                      (audio.currentTime / audio.duration) * 100
-                    );
-                  }
-                }}
+    const next = async () => {
 
-                onEnded={() => {
-                  setIsPlaying(false);
-                  setPlayProgress(100);
-                }}
+        if (
+            isRecording ||
+            isSubmitting ||
+            isProcessing
+        ) {
+            return;
+        }
 
-                onPause={() => {
-                  setIsPlaying(false);
-                }}
-              />
+        if (audioFile && !isUploaded) {
 
-              {/* PLAYBACK PROGRESS */}
+            setErrorMessage(
+                "Please submit your current recording before generating results."
+            );
 
-              <div className="progress_container">
-                <div
-                  className="progress_fill"
-                  style={{
-                    width: `${playProgress}%`,
-                  }}
-                />
-              </div>
+            return;
+        }
 
-              {/* PLAY / PAUSE */}
+        try {
+            setIsProcessing(true);
 
-              <button
-                id="play-pause_button"
-                onClick={toggle_play}
-              >
-                {isPlaying ? "⏸" : "▶"}
-              </button>
+            setErrorMessage("");
+            setUploadMessage("");
 
-              {/* RESET */}
+            setResults(null);
 
-              <button
-                id="reset_button"
-                onClick={toggle_stop}
-              >
-                ↺
-              </button>
+            const response = await fetch(
+                `${API_URL}/api/process-batch`,
+                {
+                    method: "POST"
+                }
+            );
 
-              {/* SUBMIT */}
+            const result = await response.json();
 
-              <button
-                id="submit_button"
-                onClick={submit}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? "Saving..." : "Submit"}
-              </button>
+            if (!response.ok) {
 
-            </div>
-          )}
+                throw new Error(
+                    result.message || "Processing failed."
+                );
+            }
 
-        </div>
-      </section>
+            if (!result.success) {
 
-      {/* NEXT BUTTON */}
+                throw new Error(
+                    "Could not generate animal."
+                );
+            }
 
-      <section id="lower_section">
-        <button
-          id="next_button"
-          onClick={next}
-        >
-          Click for Results
-        </button>
+            console.log("Generated results:", result);
 
-        {next_pressed && (
-          <div id="results_container">
-            <h2>Results</h2>
-            <p>Generated Name: </p>
-            <p>Generated Sound: </p>
-            <img/>
-          </div>
-        )}
+            // Display generated results
 
-      </section>
+            setResults(result);
 
-    </>
-  );
+            // Clear local recording interface
+
+            toggle_stop();
+
+        } catch (error) {
+            console.error("Processing error:", error);
+
+            setErrorMessage(
+                "Could not generate results: " +
+                error.message
+            );
+        } finally {
+
+            setIsProcessing(false);
+        }
+    };
+
+
+    // ==========================================
+    // CLEAN UP WHEN COMPONENT UNMOUNTS
+    // ==========================================
+
+    useEffect(() => {
+
+        return () => {
+
+            clearTimeout(timerRef.current);
+
+            clearInterval(intervalRef.current);
+
+            if (rafRef.current) {
+
+                cancelAnimationFrame(rafRef.current);
+            }
+
+            if (
+                mediaRecorderRef.current?.state === "recording"
+            ) {
+
+                mediaRecorderRef.current.stop();
+            }
+
+            if (
+                audioCtxRef.current &&
+                audioCtxRef.current.state !== "closed"
+            ) {
+
+                audioCtxRef.current.close();
+            }
+
+            if (audioUrlRef.current) {
+
+                URL.revokeObjectURL(
+                    audioUrlRef.current
+                );
+            }
+            if (mediaRecorderRef.current?.stream) {
+
+                mediaRecorderRef.current.stream
+                    .getTracks()
+                    .forEach(track => track.stop());
+            }
+        };
+    }, []);
+
+
+    // ==========================================
+    // USER INTERFACE
+    // ==========================================
+
+    return (
+
+        <>
+
+            {/* TITLE */}
+
+            <section id="title_section">
+                <h1 id="title">
+                    Animal Composer
+                </h1>
+                <p>Make an animal sound!</p>
+                <p>
+                    Record your sound for up to 5 seconds.
+                </p>
+            </section>
+
+
+            {/* RECORDING SECTION */}
+
+            <section id="middle_section">
+                <div id="recording_container">
+
+                    {/* RECORD BUTTON */}
+
+                    {!isRecording && !audioFile && (
+                        <button
+                            id="record_button"
+                            onClick={start_record}
+                            disabled={isProcessing}
+                        >
+                            🎙️
+                        </button>
+                    )}
+
+                    {/* RECORDING INTERFACE */}
+
+                    {isRecording && (
+                        <div id="player_bar">
+                            <div id="soundbar">
+                                <div
+                                    id="soundbar_fill"
+                                    style={{
+                                        width: `${level * 100}%`,
+                                        height: "100%"
+                                    }}
+                                />
+                            </div>
+
+                            <div className="progress_container">
+                                <div
+                                    className="progress_fill"
+                                    style={{
+                                        width: `${progress}%`
+                                    }}
+                                />
+                            </div>
+
+                            <p>
+                                {Math.max(
+                                    0,
+                                    Math.ceil(
+                                      (5000 - progress * 50) / 1000
+                                    )
+                                )}
+                                {" "}seconds left
+                            </p>
+                        </div>
+                    )}
+
+
+                    {/* PLAYBACK INTERFACE */}
+
+                    {!isRecording && audioFile && audioUrl && (
+                        <div id="player_bar">
+
+                            <audio
+                                ref={audioRef}
+                                src={audioUrl}
+                                preload="auto"
+
+                                onTimeUpdate={() => {
+
+                                    const audio = audioRef.current;
+
+                                    if (
+                                        audio &&
+                                        audio.duration
+                                    ) {
+
+                                        setPlayProgress(
+                                            (audio.currentTime /
+                                                audio.duration) * 100
+                                        );
+                                    }
+                                }}
+                                onEnded={() => {
+
+                                    setIsPlaying(false);
+
+                                    setPlayProgress(100);
+
+                                }}
+
+                                onPause={() => {
+
+                                    setIsPlaying(false);
+
+                                }}
+                            />
+
+                            {/* PLAYBACK PROGRESS */}
+
+                            <div className="progress_container">
+
+                                <div
+                                    className="progress_fill"
+                                    style={{
+                                        width: `${playProgress}%`
+                                    }}
+                                />
+
+                            </div>
+
+                            {/* PLAY / PAUSE */}
+
+                            <button
+                                id="play-pause_button"
+                                onClick={toggle_play}
+                            >
+                                {isPlaying ? "⏸" : "▶"}
+                            </button>
+
+                            {/* RESET */}
+
+                            <button
+                                id="reset_button"
+                                onClick={toggle_stop}
+                            >
+                                ↺
+                            </button>
+
+                            {/* SUBMIT */}
+
+                            <button
+                                id="submit_button"
+                                onClick={submit}
+                                disabled={
+                                    isSubmitting || isUploaded
+                                }
+                            >
+                                {isSubmitting
+                                    ? "Saving..."
+                                    : isUploaded
+                                        ? "Saved ✓"
+                                        : "Submit"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+
+            {/* STATUS MESSAGES */}
+
+            <section id="lower_section">
+                {uploadMessage && (
+                    <p>
+                        {uploadMessage}
+                    </p>
+                )}
+
+                {errorMessage && (
+                    <p
+                        role="alert"
+                        style={{ color: "red" }}
+                    >
+                        {errorMessage}
+                    </p>
+                )}
+
+                {/* RESULTS BUTTON */}
+
+                <button
+                    id="next_button"
+                    onClick={next}
+                    disabled={
+                        isRecording ||
+                        isSubmitting ||
+                        isProcessing ||
+                        (audioFile && !isUploaded)
+                    }
+                >
+                    {isProcessing
+                        ? "Generating Animal..."
+                        : "Click for Results"}
+                </button>
+
+
+                {/* PROCESSING MESSAGE */}
+
+                {isProcessing && (
+                    <p>
+                        Identifying animals and generating
+                        your hybrid creature. This may take
+                        a little while...
+                    </p>
+                )}
+
+                {/* GENERATED RESULTS */}
+
+                {results && (
+
+                    <div id="results_container">
+
+                        <h2>Your Results!</h2>
+
+                        <h3>
+                            {results.name}
+                        </h3>
+
+                        <p>
+                            Your hybrid combines:
+                            {" "}
+                            {results.animals.join(", ")}
+                        </p>
+
+
+                        {/* GENERATED IMAGE */}
+
+                        <div id="generated_image_container">
+                            <img
+                                src={results.imageUrl}
+                                alt={results.name}
+                                id="generated_image"
+                            />
+                        </div>
+
+                        {/* GENERATED AUDIO */}
+
+                        <div id="generated_audio_container">
+                            <h3>
+                                Listen to your animal!
+                            </h3>
+
+                            <audio
+                                controls
+                                src={results.audioUrl}
+                                preload="metadata"
+                            >
+                                Your browser does not support
+                                audio playback.
+                            </audio>
+                        </div>
+
+                        {/* INFO AUDIO */}
+
+                        <div id="info_audio_container">
+                            <h3>
+                                Info!
+                            </h3>
+
+                            <audio
+                                controls
+                                src="http://localhost:5000/results/info.mp3"
+                                preload="metadata"
+                            >
+                                Your browser does not support
+                                audio playback.
+                            </audio>
+                        </div>
+                    </div>
+                )}
+            </section>
+        </>
+    );
 }
 
 export default App;
