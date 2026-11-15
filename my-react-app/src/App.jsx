@@ -108,6 +108,8 @@ function App() {
   const discardRef = useRef(false);
   const audioUrlRef = useRef(null);
 
+  const [next_pressed, setNextPressed] = useState(false);
+
   // ==========================================
   // CLEAN UP AUDIO URL
   // ==========================================
@@ -518,16 +520,45 @@ function App() {
     } finally {
       setIsSubmitting(false);
     }
+
+    fetch("http://localhost:5000/run-python", {
+      method: "POST",
+    });
   };
 
   // ==========================================
   // NEXT BUTTON
   // ==========================================
 
-  const next = () => {
+  const next = async () => {
     toggle_stop();
     console.log("Next!");
-  };
+
+    // Fetch generated name, sound and image and display below
+    
+    setNextPressed(true);
+
+    // Clear Sounds folder
+    try {
+        response = await fetch(
+            "http://localhost:5000/api/clear-sounds",
+            {
+                method: "DELETE",
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.message);
+        }
+
+        console.log(result.message);
+
+    } catch (err) {
+        console.error("Error deleting Sounds contents:", err);
+    }
+  };  
 
   // ==========================================
   // CLEAN UP WHEN COMPONENT UNMOUNTS
@@ -711,9 +742,20 @@ function App() {
           id="next_button"
           onClick={next}
         >
-          →
+          Click for Results
         </button>
+
+        {next_pressed && (
+          <div id="results_container">
+            <h2>Results</h2>
+            <p>Generated Name: </p>
+            <p>Generated Sound: </p>
+            <img/>
+          </div>
+        )}
+
       </section>
+
     </>
   );
 }
